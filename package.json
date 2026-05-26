@@ -1,0 +1,13 @@
+{
+  "name": "book-condenser",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev:frontend": "cd frontend && npm.cmd run dev",
+    "dev:backend": "cd backend && set PYTHONUTF8=1&& .\\venv\\Scripts\\fastapi dev app/main.py",
+    "dev": "concurrently \"npm.cmd run dev:frontend\" \"npm.cmd run dev:backend\""
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
