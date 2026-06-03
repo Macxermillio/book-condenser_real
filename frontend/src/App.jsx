@@ -647,7 +647,7 @@ function AboutPage({ onBack }) {
         </p>
         <p>
           Book summaries are obviously not an option. A summary has much of the
-          essence of the book, its feel, context and process stripped away. If
+          essence of the book, its feel, context and process, stripped away. If
           you love reading they just won&apos;t do. There is a joy in following the
           author&apos;s thought process, perceiving their voice, the unique way they
           formulate their opinions and witnessing their reasoning in real time.
@@ -665,7 +665,7 @@ function AboutPage({ onBack }) {
           So, I built the Book Condenser.
         </p>
         <p>
-          This isn&apos;t an AI tool designed to replace reading; some books are
+          Abridged books aren&apos;t new but never has it been easier to produce them; some books are
           worth wading through the unnecessary stuff, but some books aren&apos;t
           worth it.
         </p>
