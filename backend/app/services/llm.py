@@ -9,10 +9,9 @@ from app.services.prompts.range_system_prompt import RANGE_SYSTEM_PROMPT, CHAPTE
 from app.services.prompts.range_user_prompt import RANGE_USER_PROMPT
 from app.services.app_models.chunk_models import ChapterRangesFormat
 from app.exceptions.validation import InputTooLargeError, MAX_INPUT_CHARS
+from app.utils.llm_functions import condense_chapters_function, chapter_ranges_function
 
 
-MODEL = "deepseek/deepseek-v4-flash"
-MAX_PARSE_RETRIES = 3
 
 _settings = get_settings()
 
@@ -71,50 +70,12 @@ async def validate_chapter_ranges(chunks: list, counter: int = 0, tokens: int = 
 
 async def chapter_ranges_with_llm(chunks: list) -> dict:
 
-    messages = [
+    prompt = [
         {"role": "system", "content": RANGE_SYSTEM_PROMPT + RANGE_JSON_INSTRUCTION},
         {"role": "user", "content": RANGE_USER_PROMPT.format(chunks=chunks)},
     ]
 
-    total_tokens_in = 0
-    total_tokens_out = 0
-    last_error: Exception = None
-
-    for _ in range(1, MAX_PARSE_RETRIES + 1):
-        response = await client.chat.completions.create(
-            model=MODEL,
-            messages=messages,
-        )
-
-        raw = response.choices[0].message.content
-        usage = response.usage
-        total_tokens_in += usage.prompt_tokens
-        total_tokens_out += usage.completion_tokens
-
-        try:
-            parsed = _extract_and_parse(raw)
-            return {
-                "chapter_ranges": parsed,
-                "tokens_in": total_tokens_in,
-                "tokens_out": total_tokens_out,
-            }
-        except (json.JSONDecodeError, ValidationError, TypeError, KeyError) as e:
-            last_error = e
-
-            messages.append({"role": "assistant", "content": raw})
-            messages.append({
-                "role": "user",
-                "content": (
-                    f"Your response could not be parsed. Error: {e}\n"
-                    "Please reply with ONLY valid JSON — no markdown, no explanation, "
-                    f"exactly matching this structure:\n{CHAPTER_RANGES_SCHEMA}"
-                ),
-            })
-
-    raise ValueError(
-        f"Failed to parse a valid chapter ranges response after {MAX_PARSE_RETRIES} attempts. "
-        f"Last error: {last_error}"
-    )
+    return await chapter_ranges_function(client, prompt, _extract_and_parse).get_response()
 
 def chapters_from_ranges(chunks: list, chapter_ranges: list) -> list:
 
@@ -150,43 +111,12 @@ async def condense_chapters(text: str, chapter_info: dict = None) -> dict:
                 chapter_header += chapter_info['chapter_title']
         if chapter_header:
             chapter_header += "\n\n"
+        text = chapter_header + text
+        formatted_prompt = CONDENSING_PROMPT.format(chunk=text)
+        messages = [{"role": "user", "content": formatted_prompt}]
+    return await condense_chapters_function(client, messages).get_response()
 
-    formatted_prompt = CONDENSING_PROMPT.format(chunk=text)
-    messages = [{"role": "user", "content": formatted_prompt}]
 
-    total_tokens_in = 0
-    total_tokens_out = 0
-    last_error: Exception = None
-
-    for _ in range(1, MAX_PARSE_RETRIES + 1):
-        response = await client.chat.completions.create(
-            model=MODEL,
-            messages=messages,
-        )
-
-        usage = response.usage
-        total_tokens_in += usage.prompt_tokens
-        total_tokens_out += usage.completion_tokens
-
-        content = response.choices[0].message.content if response.choices else None
-
-        if content:
-            return {
-                "condensed": content,
-                "tokens_in": total_tokens_in,
-                "tokens_out": total_tokens_out,
-            }
-
-        finish_reason = response.choices[0].finish_reason if response.choices else "no_choices"
-        last_error = ValueError(f"Empty content in response (finish_reason: {finish_reason})")
-
-        messages.append({"role": "assistant", "content": ""})
-        messages.append({"role": "user", "content": "Please provide the condensed text."})
-
-    raise ValueError(
-        f"Failed to get a text response after {MAX_PARSE_RETRIES} attempts. "
-        f"Last error: {last_error}"
-    )
 async def condense_with_llm(text: str) -> dict:
 
     if len(text) > MAX_INPUT_CHARS:
