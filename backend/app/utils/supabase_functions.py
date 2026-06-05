@@ -95,7 +95,7 @@ class supabase_func:
 
         logger.info("Added book filename=%s", file_name)
 
-        logger.info("Usage logged for user=%s: %s", user_id)
+        logger.info("Usage logged for user=%s", user_id)
 
         return response
 
