@@ -232,6 +232,7 @@ async def upload_file(
         raise RateLimitError(
             log_message=f"Rate limit exceeded for user={user.id}"
         )
+    await asyncio.sleep(10)
     try:
         supabase_func.log_usage(user_id=user.id, file_name=file.filename, email=user.email)
         asyncio.create_task(delete_log(user.id))
