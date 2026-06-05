@@ -3,10 +3,13 @@ import tempfile
 from supabase import create_client
 from app.config import get_settings
 from datetime import datetime, timedelta, timezone
+from app.core.logging import logger
 
 _settings = get_settings()
 
 supabase = create_client(_settings.supabase_url, _settings.supabase_service_key)
+
+
 
 class supabase_func:
 
@@ -76,13 +79,23 @@ class supabase_func:
         return local_path
 
     @staticmethod
-    def log_usage(user_id: str, tokens_in: int = 0, tokens_out: int = 0, cost_credits: float = 0.0):
+    def log_usage(user_id: str, tokens_in: int = 0, tokens_out: int = 0, cost_credits: float = 0.0, file_name: str = "unknown", email: str = "unknown"):
 
         response = (
             supabase.table("usage_logs")
             .insert({"user_id": user_id, "tokens_in": tokens_in, "tokens_out": tokens_out, "cost_credits": cost_credits})
             .execute()
         )
+
+        add_book = (
+            supabase.table("books")
+            .insert({"user_id": user_id, "original_filename": file_name, "email": email})
+            .execute()
+        )
+
+        logger.info("Added book filename=%s", file_name)
+
+        logger.info("Usage logged for user=%s: %s", user_id)
 
         return response
 
@@ -105,3 +118,32 @@ class supabase_func:
         except Exception as e:
             print(f"Error retrieving logs: {e}")
             return []
+
+    @staticmethod
+    def log_deletion(user_id: str):
+
+        try:
+            response = (
+                supabase.table("usage_logs")
+                .delete()
+                .eq("user_id", user_id)
+                .execute()
+            )
+
+
+            if response.data and len(response.data) > 0:
+                logger.info("Uplifted rate limit on user=%s", user_id)
+                return True
+            else:
+                logger.warning(
+                    "No usage logs found to delete for user=%s", user_id
+                )
+                return False
+
+        except Exception as e:
+
+            logger.error(
+                "Database error while deleting logs for user=%s: %s", user_id, e
+            )
+            return False
+

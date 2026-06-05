@@ -211,18 +211,41 @@ async def schedule_deletion(file: str, user_id: str, delay: int = 1800):
             e,
         )
 
+async def delete_log(user_id: str, delay: int = 3600):
+    await asyncio.sleep(delay)
+    try:
+        supabase_func.log_deletion(user_id)
+    except Exception as e:
+        logger.warning(
+            "Scheduled deletion log failed — user=%s: %s",
+            user_id,
+            e,
+        )
 
 @router.post("/upload")
 async def upload_file(
     file: UploadFile = File(...),
     user=Depends(get_current_user),
 ):
-    if len(supabase_func.get_recent_usage(user.id)) > 0:
-        raise RateLimitError(
-            log_message=f"Rate limit exceeded for user={user.id}"
+    # if len(supabase_func.get_recent_usage(user.id)) > 0:
+    #     raise RateLimitError(
+    #         log_message=f"Rate limit exceeded for user={user.id}"
+    #     )
+    try:
+        supabase_func.log_usage(user_id=user.id, file_name=file.filename, email=user.email)
+        asyncio.create_task(delete_log(user.id))
+    except Exception as e:
+
+        logger.warning(
+            "Failed to log usage for user=%s: %s",
+            user.id,
+            e,
         )
 
-    supabase_func.log_usage(user_id=user.id)
+        raise RateLimitError(
+            log_message=f"Rate limit exceeded for user={user.id}"
+        ) from e
+
     file_bytes = await file.read()
 
     if not supabase_func.upload_file(file_bytes, file.filename, user.id):
@@ -240,6 +263,7 @@ async def upload_file(
 
     asyncio.create_task(schedule_deletion(file.filename, user.id))
     asyncio.create_task(schedule_deletion(condensed_filename, user.id))
+
 
     return {
         "message": "Your book is ready to download!",
