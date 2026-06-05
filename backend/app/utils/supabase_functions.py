@@ -113,6 +113,10 @@ class supabase_func:
                 .execute()
             )
 
+            if response.data > 0:
+                logger.info("Recent usage found for user=%s", user_id)
+            else:
+                supabase_func.log_deletion(user_id=user_id)
             return response.data
 
         except Exception as e:
