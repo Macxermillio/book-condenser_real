@@ -140,6 +140,7 @@ async def process_book_task(file: str, user_id: str):
     try:
         path = supabase_func.download_file(file, user_id)
     except Exception as e:
+        supabase_func.log_deletion(user_id)
         raise FileDownloadError(
             log_message=(
                 f"Download failed — user={user_id} file={file}: {e}"
@@ -150,6 +151,7 @@ async def process_book_task(file: str, user_id: str):
         full_text = extract_text(path)
         logger.info("Extracted %d characters from %s", len(full_text), path)
     except Exception as e:
+        supabase_func.log_deletion(user_id)
         raise TextExtractionError(
             log_message=f"Extraction failed for {path}: {e}"
         ) from e
@@ -163,6 +165,7 @@ async def process_book_task(file: str, user_id: str):
             tokens_saved,
         )
     except Exception as e:
+        supabase_func.log_deletion(user_id)
         raise LLMProcessingError(
             log_message=f"LLM processing failed — user={user_id}: {e}"
         ) from e
@@ -183,6 +186,7 @@ async def process_book_task(file: str, user_id: str):
             condensed_bytes, filename, user_id, content_type="application/pdf"
         )
         if not upload_result:
+            supabase_func.log_deletion(user_id)
             raise FileUploadError(
                 log_message=(
                     f"Storage returned falsy for condensed upload "
@@ -190,8 +194,10 @@ async def process_book_task(file: str, user_id: str):
                 )
             )
     except FileUploadError:
+        supabase_func.log_deletion(user_id)
         raise
     except Exception as e:
+        supabase_func.log_deletion(user_id)
         raise FileUploadError(
             log_message=f"Condensed upload failed — user={user_id}: {e}"
         ) from e
@@ -251,6 +257,7 @@ async def upload_file(
     file_bytes = await file.read()
 
     if not supabase_func.upload_file(file_bytes, file.filename, user.id):
+        supabase_func.log_deletion(user.id)
         raise FileUploadError(
             log_message=(
                 f"Initial upload returned falsy "
