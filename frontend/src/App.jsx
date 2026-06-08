@@ -12,12 +12,15 @@ import {
 import {
   clearStoredToken,
   getProfile,
+  getSessionRefreshedAt,
+  getStoredRefreshToken,
   getStoredToken,
   login,
   requestPasswordReset,
+  refreshSession,
   resetPassword,
   signup,
-  storeToken,
+  storeSession,
   uploadBook
 } from "./api";
 
@@ -312,7 +315,7 @@ function AuthPage({ onAuthenticated, onForgotPassword, onShowAbout }) {
       }
 
       const session = await login(form);
-      storeToken(session.access_token);
+      storeSession(session);
       const profile = await getProfile(session.access_token);
       onAuthenticated(session.access_token, profile);
     } catch (error) {
@@ -688,6 +691,7 @@ export default function App() {
     downloadUrl: ""
   });
   const dismissTimerRef = useRef(null);
+  const refreshInFlightRef = useRef(false);
 
   // Detect Supabase password-recovery tokens in the URL hash on first load.
   useEffect(() => {
@@ -734,6 +738,42 @@ export default function App() {
     loadProfile();
     return () => {
       isMounted = false;
+    };
+  }, [token]);
+
+  useEffect(() => {
+    if (!token) return;
+
+    const REFRESH_AFTER_MS = 50 * 60 * 1000;
+
+    async function refreshIfStale() {
+      if (document.visibilityState !== "visible") return;
+      if (refreshInFlightRef.current) return;
+
+      const refreshToken = getStoredRefreshToken();
+      const lastRefresh = getSessionRefreshedAt();
+      if (!refreshToken || Date.now() - lastRefresh < REFRESH_AFTER_MS) return;
+
+      refreshInFlightRef.current = true;
+      try {
+        const session = await refreshSession(refreshToken);
+        storeSession(session);
+        setToken(session.access_token);
+      } catch {
+        clearStoredToken();
+        setToken(null);
+        setProfile(null);
+      } finally {
+        refreshInFlightRef.current = false;
+      }
+    }
+
+    document.addEventListener("visibilitychange", refreshIfStale);
+    window.addEventListener("focus", refreshIfStale);
+
+    return () => {
+      document.removeEventListener("visibilitychange", refreshIfStale);
+      window.removeEventListener("focus", refreshIfStale);
     };
   }, [token]);
 

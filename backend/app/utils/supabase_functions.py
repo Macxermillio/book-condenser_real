@@ -102,7 +102,7 @@ class supabase_func:
     @staticmethod
     def get_recent_usage(user_id: str):
 
-        time_threshold = datetime.now(timezone.utc) - timedelta(minutes=60)
+        time_threshold = datetime.now(timezone.utc) - timedelta(minutes=15)
 
         try:
             response = (

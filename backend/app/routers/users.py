@@ -8,7 +8,13 @@ from supabase import Client
 from markdown_pdf import MarkdownPdf, Section
 
 from app.db import get_supabase
-from app.models import UserCreate, User, PasswordResetRequest, PasswordReset
+from app.models import (
+    UserCreate,
+    User,
+    PasswordResetRequest,
+    PasswordReset,
+    RefreshSessionRequest,
+)
 from app.config import get_settings
 from app.auth import get_current_user
 from app.core.logging import logger
@@ -83,7 +89,35 @@ async def login(
             log_message=f"Unverified email login attempt: {form_data.username}"
         )
 
-    return {"access_token": res.session.access_token, "token_type": "bearer"}
+    return {
+        "access_token": res.session.access_token,
+        "refresh_token": res.session.refresh_token,
+        "token_type": "bearer",
+    }
+
+
+@router.post("/refresh")
+async def refresh_session(
+    body: RefreshSessionRequest,
+    supabase: Client = Depends(get_supabase),
+):
+    try:
+        res = supabase.auth.refresh_session(body.refresh_token)
+    except Exception as e:
+        raise InvalidCredentialsError(
+            log_message=f"Session refresh failed: {e}"
+        ) from e
+
+    if not res.session:
+        raise InvalidCredentialsError(
+            log_message="Supabase returned no session during refresh"
+        )
+
+    return {
+        "access_token": res.session.access_token,
+        "refresh_token": res.session.refresh_token,
+        "token_type": "bearer",
+    }
 
 
 @router.get("/me", response_model=User)
@@ -218,7 +252,7 @@ async def schedule_deletion(file: str, user_id: str, delay: int = 1800):
             e,
         )
 
-async def delete_log(user_id: str, delay: int = 3600):
+async def delete_log(user_id: str, delay: int = 900):
     await asyncio.sleep(delay)
     try:
         supabase_func.log_deletion(user_id)

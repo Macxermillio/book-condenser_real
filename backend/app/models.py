@@ -30,6 +30,9 @@ class PasswordReset(BaseModel):
     refresh_token: str
     new_password: str
 
+class RefreshSessionRequest(BaseModel):
+    refresh_token: str
+
 class UsageLog(BaseModel):
     user_id: str
     tokens_in: int

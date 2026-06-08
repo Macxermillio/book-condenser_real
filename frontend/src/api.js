@@ -1,5 +1,7 @@
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "/api";
 const TOKEN_KEY = "book_condenser_token";
+const REFRESH_TOKEN_KEY = "book_condenser_refresh_token";
+const SESSION_REFRESHED_AT_KEY = "book_condenser_session_refreshed_at";
 
 async function parseResponse(response) {
   const contentType = response.headers.get("content-type") || "";
@@ -40,12 +42,29 @@ export function getStoredToken() {
   return localStorage.getItem(TOKEN_KEY);
 }
 
+export function getStoredRefreshToken() {
+  return localStorage.getItem(REFRESH_TOKEN_KEY);
+}
+
+export function getSessionRefreshedAt() {
+  return Number(localStorage.getItem(SESSION_REFRESHED_AT_KEY) || 0);
+}
+
 export function storeToken(token) {
   localStorage.setItem(TOKEN_KEY, token);
+  localStorage.setItem(SESSION_REFRESHED_AT_KEY, String(Date.now()));
+}
+
+export function storeSession(session) {
+  localStorage.setItem(TOKEN_KEY, session.access_token);
+  localStorage.setItem(REFRESH_TOKEN_KEY, session.refresh_token);
+  localStorage.setItem(SESSION_REFRESHED_AT_KEY, String(Date.now()));
 }
 
 export function clearStoredToken() {
   localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(REFRESH_TOKEN_KEY);
+  localStorage.removeItem(SESSION_REFRESHED_AT_KEY);
 }
 
 export async function signup({ fullName, email, password }) {
@@ -69,6 +88,14 @@ export async function login({ email, password }) {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: form
+  }));
+}
+
+export async function refreshSession(refreshToken) {
+  return parseResponse(await fetch(`${API_BASE_URL}/auth/refresh`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ refresh_token: refreshToken })
   }));
 }
 
