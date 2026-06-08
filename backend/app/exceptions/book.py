@@ -6,7 +6,7 @@ class RateLimitError(AppException):
     status_code = 429
     detail = (
         "You have exceeded the rate limit for uploading files. "
-        "If you have uploaded a file within the last 60 minutes, wait before uploading again."
+        "If you have uploaded a file within the last 15 minutes, wait before uploading again."
     )
 
 
