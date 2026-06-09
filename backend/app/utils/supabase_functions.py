@@ -42,7 +42,7 @@ class supabase_func:
         return response
 
     @staticmethod
-    def create_download_url(file_name: str, user_id: str, expires_in: int = 1800):
+    def create_download_url(file_name: str, user_id: str, expires_in: int = 3600):
         file_path = f"{user_id}/{file_name}"
         response = (
             supabase.storage

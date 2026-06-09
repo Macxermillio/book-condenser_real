@@ -803,7 +803,7 @@ export default function App() {
 
     setUploadState({ type: "uploading", message: "Condensing your book…", downloadUrl: "" });
 
-    const DISMISS_MS = 30 * 60 * 1000;
+    const DISMISS_MS = 60 * 60 * 1000;
 
     function scheduleDismiss() {
       clearTimeout(dismissTimerRef.current);
