@@ -81,7 +81,7 @@ class supabase_func:
     @staticmethod
     def log_usage(user_id: str, tokens_in: int = 0, tokens_out: int = 0, cost_credits: float = 0.0, file_name: str = "unknown", email: str = "unknown"):
 
-        response = (
+        (
             supabase.table("usage_logs")
             .insert({"user_id": user_id, "tokens_in": tokens_in, "tokens_out": tokens_out, "cost_credits": cost_credits})
             .execute()
@@ -89,15 +89,64 @@ class supabase_func:
 
         add_book = (
             supabase.table("books")
-            .insert({"user_id": user_id, "original_filename": file_name, "email": email})
+            .insert({
+                "user_id": user_id,
+                "original_filename": file_name,
+                "email": email,
+                "status": "processing",
+            })
+            .select("id")
             .execute()
         )
 
-        logger.info("Added book filename=%s", file_name)
+        book_id = add_book.data[0]["id"] if add_book.data else None
+
+        logger.info("Added book id=%s filename=%s", book_id, file_name)
 
         logger.info("Usage logged for user=%s", user_id)
 
-        return response
+        return book_id
+
+    @staticmethod
+    def update_book(
+        book_id: str,
+        *,
+        status: str,
+        condensed_filename: str | None = None,
+        download_url: str | None = None,
+    ):
+        payload: dict = {"status": status}
+        if condensed_filename is not None:
+            payload["condensed_filename"] = condensed_filename
+        if download_url is not None:
+            payload["download_url"] = download_url
+
+        response = (
+            supabase.table("books")
+            .update(payload)
+            .eq("id", book_id)
+            .execute()
+        )
+        return response.data[0] if response.data else None
+
+    @staticmethod
+    def get_recoverable_book(user_id: str, original_filename: str | None = None):
+        time_threshold = datetime.now(timezone.utc) - timedelta(minutes=60)
+
+        query = (
+            supabase.table("books")
+            .select("*")
+            .eq("user_id", user_id)
+            .gte("created_at", time_threshold.isoformat())
+            .order("created_at", desc=True)
+        )
+        if original_filename:
+            query = query.eq("original_filename", original_filename)
+
+        response = query.limit(1).execute()
+        if not response.data:
+            return None
+        return response.data[0]
 
     @staticmethod
     def get_recent_usage(user_id: str):

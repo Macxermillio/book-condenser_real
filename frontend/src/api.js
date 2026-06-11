@@ -128,6 +128,19 @@ export async function resetPassword({ accessToken, refreshToken, newPassword }) 
   }));
 }
 
+export async function getLatestBook({ token, filename }) {
+  const params = new URLSearchParams();
+  if (filename) {
+    params.set("filename", filename);
+  }
+  const query = params.toString();
+  const url = `${API_BASE_URL}/auth/latest-book${query ? `?${query}` : ""}`;
+
+  return parseResponse(await fetch(url, {
+    headers: { Authorization: `Bearer ${token}` }
+  }));
+}
+
 export async function uploadBook({ file, token, signal }) {
   const form = new FormData();
   form.append("file", file);

@@ -2,7 +2,7 @@ import os
 import tempfile
 import asyncio
 
-from fastapi import APIRouter, Depends, UploadFile, File
+from fastapi import APIRouter, Depends, UploadFile, File, Query
 from fastapi.security import OAuth2PasswordRequestForm
 from supabase import Client
 from markdown_pdf import MarkdownPdf, Section
@@ -15,6 +15,7 @@ from app.models import (
     PasswordResetRequest,
     PasswordReset,
     RefreshSessionRequest,
+    LatestBookResponse,
 )
 from app.config import get_settings
 from app.auth import get_current_user
@@ -171,11 +172,20 @@ async def reset_password(
     return {"message": "Password updated successfully"}
 
 
-async def process_book_task(file: str, user_id: str):
+def _mark_book_error(book_id: str | None):
+    if book_id:
+        try:
+            supabase_func.update_book(book_id, status="error")
+        except Exception as e:
+            logger.warning("Failed to mark book=%s as error: %s", book_id, e)
+
+
+async def process_book_task(file: str, user_id: str, book_id: str | None = None):
     try:
         path = supabase_func.download_file(file, user_id)
     except Exception as e:
         supabase_func.log_deletion(user_id)
+        _mark_book_error(book_id)
         raise FileDownloadError(
             log_message=(
                 f"Download failed — user={user_id} file={file}: {e}"
@@ -187,6 +197,7 @@ async def process_book_task(file: str, user_id: str):
         logger.info("Extracted %d characters from %s", len(full_text), path)
     except Exception as e:
         supabase_func.log_deletion(user_id)
+        _mark_book_error(book_id)
         raise TextExtractionError(
             log_message=f"Extraction failed for {path}: {e}"
         ) from e
@@ -201,6 +212,7 @@ async def process_book_task(file: str, user_id: str):
         )
     except Exception as e:
         supabase_func.log_deletion(user_id)
+        _mark_book_error(book_id)
         raise LLMProcessingError(
             log_message=f"LLM processing failed — user={user_id}: {e}"
         ) from e
@@ -222,6 +234,7 @@ async def process_book_task(file: str, user_id: str):
         )
         if not upload_result:
             supabase_func.log_deletion(user_id)
+            _mark_book_error(book_id)
             raise FileUploadError(
                 log_message=(
                     f"Storage returned falsy for condensed upload "
@@ -230,15 +243,32 @@ async def process_book_task(file: str, user_id: str):
             )
     except FileUploadError:
         supabase_func.log_deletion(user_id)
+        _mark_book_error(book_id)
         raise
     except Exception as e:
         supabase_func.log_deletion(user_id)
+        _mark_book_error(book_id)
         raise FileUploadError(
             log_message=f"Condensed upload failed — user={user_id}: {e}"
         ) from e
 
     os.remove(path)
-    return supabase_func.create_download_url(filename, user_id)
+    download_url = supabase_func.create_download_url(filename, user_id)
+
+    if book_id:
+        try:
+            supabase_func.update_book(
+                book_id,
+                status="done",
+                condensed_filename=filename,
+                download_url=download_url,
+            )
+        except Exception as e:
+            logger.warning(
+                "Failed to persist download for book=%s: %s", book_id, e
+            )
+
+    return download_url
 
 
 async def schedule_deletion(file: str, user_id: str, delay: int = 1800):
@@ -275,7 +305,9 @@ async def upload_file(
         )
     await asyncio.sleep(10)
     try:
-        supabase_func.log_usage(user_id=user.id, file_name=file.filename, email=user.email)
+        book_id = supabase_func.log_usage(
+            user_id=user.id, file_name=file.filename, email=user.email
+        )
         asyncio.create_task(delete_log(user.id))
     except Exception as e:
 
@@ -293,6 +325,7 @@ async def upload_file(
 
     if not supabase_func.upload_file(file_bytes, file.filename, user.id):
         supabase_func.log_deletion(user.id)
+        _mark_book_error(book_id)
         raise FileUploadError(
             log_message=(
                 f"Initial upload returned falsy "
@@ -303,13 +336,45 @@ async def upload_file(
     condensed_filename = (
         f"{os.path.splitext(file.filename)[0]}_condensed.pdf"
     )
-    download_url = await process_book_task(file.filename, user.id)
+    download_url = await process_book_task(
+        file.filename, user.id, book_id=book_id
+    )
 
     asyncio.create_task(schedule_deletion(file.filename, user.id))
     asyncio.create_task(schedule_deletion(condensed_filename, user.id))
-
 
     return {
         "message": "Your book is ready to download!",
         "download_url": download_url,
     }
+
+
+def _book_download_url(book: dict, user_id: str) -> str | None:
+    condensed_filename = book.get("condensed_filename")
+    if book.get("status") != "done" or not condensed_filename:
+        return None
+    try:
+        return supabase_func.create_download_url(condensed_filename, user_id)
+    except Exception as e:
+        logger.warning(
+            "Failed to create download URL for book=%s: %s", book.get("id"), e
+        )
+        return book.get("download_url")
+
+
+@router.get("/latest-book", response_model=LatestBookResponse)
+async def latest_book(
+    user=Depends(get_current_user),
+    filename: str | None = Query(default=None),
+):
+    book = supabase_func.get_recoverable_book(user.id, original_filename=filename)
+    if not book:
+        return LatestBookResponse(status="none")
+
+    return LatestBookResponse(
+        id=book.get("id"),
+        status=book.get("status", "unknown"),
+        original_filename=book.get("original_filename"),
+        download_url=_book_download_url(book, user.id),
+        created_at=book.get("created_at"),
+    )

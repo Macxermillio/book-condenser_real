@@ -43,3 +43,10 @@ class UsageLog(BaseModel):
 
 class SignUpMsg(BaseModel):
     message: str
+
+class LatestBookResponse(BaseModel):
+    id: Optional[str] = None
+    status: str
+    original_filename: Optional[str] = None
+    download_url: Optional[str] = None
+    created_at: Optional[datetime] = None

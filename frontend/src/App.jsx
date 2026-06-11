@@ -21,7 +21,8 @@ import {
   resetPassword,
   signup,
   storeSession,
-  uploadBook
+  uploadBook,
+  getLatestBook
 } from "./api";
 
 const views = {
@@ -806,6 +807,27 @@ export default function App() {
     return session.access_token;
   }
 
+  async function tryRecoverLatestBook(token, filename) {
+    const POLL_INTERVAL_MS = 10_000;
+    const MAX_POLLS = 12;
+
+    for (let attempt = 0; attempt <= MAX_POLLS; attempt += 1) {
+      const latest = await getLatestBook({ token, filename });
+
+      if (latest.status === "done" && latest.download_url) {
+        return latest;
+      }
+
+      if (latest.status !== "processing" || attempt === MAX_POLLS) {
+        return latest;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+    }
+
+    return null;
+  }
+
   async function handleUpload() {
     if (!selectedFile || uploadState.type === "uploading") return;
 
@@ -848,6 +870,28 @@ export default function App() {
       scheduleDismiss();
     } catch (error) {
       clearTimeout(timeoutId);
+
+      try {
+        const recoveryToken = await refreshCurrentSession();
+        const recovered = await tryRecoverLatestBook(
+          recoveryToken,
+          selectedFile.name
+        );
+
+        if (recovered?.status === "done" && recovered.download_url) {
+          setUploadState({
+            type: "success",
+            message: "Your book finished processing while the connection was interrupted.",
+            downloadUrl: recovered.download_url
+          });
+          setSelectedFile(null);
+          scheduleDismiss();
+          return;
+        }
+      } catch {
+        // Fall through to the original error message.
+      }
+
       const isTimeout = error.name === "AbortError";
       setUploadState({
         type: "error",
