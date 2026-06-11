@@ -40,3 +40,6 @@ class UsageLog(BaseModel):
     cost_credits: float
     book_id: Optional[str] = None
     timestamp: datetime
+
+class SignUpMsg(BaseModel):
+    message: str

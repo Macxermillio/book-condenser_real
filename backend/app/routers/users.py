@@ -9,6 +9,7 @@ from markdown_pdf import MarkdownPdf, Section
 
 from app.db import get_supabase
 from app.models import (
+    SignUpMsg,
     UserCreate,
     User,
     PasswordResetRequest,
@@ -40,7 +41,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 # Hmm
 
-@router.post("/signup", response_model=User)
+@router.post("/signup", response_model=SignUpMsg)
 async def signup(
     user_data: UserCreate,
     supabase: Client = Depends(get_supabase),
