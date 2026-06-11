@@ -80,32 +80,50 @@ class supabase_func:
 
     @staticmethod
     def log_usage(user_id: str, tokens_in: int = 0, tokens_out: int = 0, cost_credits: float = 0.0, file_name: str = "unknown", email: str = "unknown"):
+        usage_inserted = False
 
-        (
-            supabase.table("usage_logs")
-            .insert({"user_id": user_id, "tokens_in": tokens_in, "tokens_out": tokens_out, "cost_credits": cost_credits})
-            .execute()
-        )
+        try:
+            (
+                supabase.table("usage_logs")
+                .insert({"user_id": user_id, "tokens_in": tokens_in, "tokens_out": tokens_out, "cost_credits": cost_credits})
+                .execute()
+            )
+            usage_inserted = True
 
-        add_book = (
-            supabase.table("books")
-            .insert({
-                "user_id": user_id,
-                "original_filename": file_name,
-                "email": email,
-                "status": "processing",
-            })
-            .select("id")
-            .execute()
-        )
+            add_book = (
+                supabase.table("books")
+                .insert({
+                    "user_id": user_id,
+                    "original_filename": file_name,
+                    "email": email,
+                    "status": "processing",
+                })
+                .execute()
+            )
 
-        book_id = add_book.data[0]["id"] if add_book.data else None
+            book_id = add_book.data[0]["id"] if add_book.data else None
 
-        logger.info("Added book id=%s filename=%s", book_id, file_name)
+            if not book_id:
+                fallback = (
+                    supabase.table("books")
+                    .select("id")
+                    .eq("user_id", user_id)
+                    .eq("original_filename", file_name)
+                    .order("created_at", desc=True)
+                    .limit(1)
+                    .execute()
+                )
+                if fallback.data:
+                    book_id = fallback.data[0]["id"]
 
-        logger.info("Usage logged for user=%s", user_id)
+            logger.info("Added book id=%s filename=%s", book_id, file_name)
+            logger.info("Usage logged for user=%s", user_id)
 
-        return book_id
+            return book_id
+        except Exception:
+            if usage_inserted:
+                supabase_func.log_deletion(user_id)
+            raise
 
     @staticmethod
     def update_book(

@@ -310,15 +310,13 @@ async def upload_file(
         )
         asyncio.create_task(delete_log(user.id))
     except Exception as e:
-
-        logger.warning(
+        logger.error(
             "Failed to log usage for user=%s: %s",
             user.id,
             e,
         )
-
-        raise RateLimitError(
-            log_message=f"Rate limit exceeded for user={user.id}"
+        raise FileUploadError(
+            log_message=f"Failed to start upload for user={user.id}: {e}"
         ) from e
 
     file_bytes = await file.read()
