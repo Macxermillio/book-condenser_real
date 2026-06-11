@@ -13,7 +13,7 @@ class RateLimitError(AppException):
 class FileUploadError(AppException):
 
     status_code = 400
-    detail = "File upload failed"
+    detail = "File upload failed, please try again."
 
 
 class FileDownloadError(AppException):
@@ -25,10 +25,10 @@ class FileDownloadError(AppException):
 class TextExtractionError(AppException):
 
     status_code = 400
-    detail = "Text extraction failed"
+    detail = "Text extraction failed, please try again with different file or format."
 
 
 class LLMProcessingError(AppException):
 
     status_code = 500
-    detail = "LLM processing failed"
+    detail = "LLM processing failed, please try again."
