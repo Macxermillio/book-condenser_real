@@ -29,6 +29,8 @@ const views = {
   about: "about"
 };
 
+const SESSION_REFRESH_AFTER_MS = 5 * 60 * 1000;
+
 function formatDate(value) {
   if (!value) return "Unavailable";
   return new Intl.DateTimeFormat(undefined, {
@@ -744,15 +746,13 @@ export default function App() {
   useEffect(() => {
     if (!token) return;
 
-    const REFRESH_AFTER_MS = 50 * 60 * 1000;
-
     async function refreshIfStale() {
       if (document.visibilityState !== "visible") return;
       if (refreshInFlightRef.current) return;
 
       const refreshToken = getStoredRefreshToken();
       const lastRefresh = getSessionRefreshedAt();
-      if (!refreshToken || Date.now() - lastRefresh < REFRESH_AFTER_MS) return;
+      if (!refreshToken || Date.now() - lastRefresh < SESSION_REFRESH_AFTER_MS) return;
 
       refreshInFlightRef.current = true;
       try {
@@ -794,6 +794,18 @@ export default function App() {
     setUploadState({ type: "idle", message: "", downloadUrl: "" });
   }
 
+  async function refreshCurrentSession() {
+    const refreshToken = getStoredRefreshToken();
+    if (!refreshToken) {
+      throw new Error("Your session expired. Please log in again.");
+    }
+
+    const session = await refreshSession(refreshToken);
+    storeSession(session);
+    setToken(session.access_token);
+    return session.access_token;
+  }
+
   async function handleUpload() {
     if (!selectedFile || uploadState.type === "uploading") return;
 
@@ -813,7 +825,19 @@ export default function App() {
     }
 
     try {
-      const result = await uploadBook({ file: selectedFile, token, signal: controller.signal });
+      let uploadToken = await refreshCurrentSession();
+      let result;
+
+      try {
+        result = await uploadBook({ file: selectedFile, token: uploadToken, signal: controller.signal });
+      } catch (error) {
+        if (error.status !== 401) {
+          throw error;
+        }
+        uploadToken = await refreshCurrentSession();
+        result = await uploadBook({ file: selectedFile, token: uploadToken, signal: controller.signal });
+      }
+
       clearTimeout(timeoutId);
       setUploadState({
         type: "success",

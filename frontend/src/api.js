@@ -32,7 +32,10 @@ async function parseResponse(response) {
         message = body;
       }
     }
-    throw new Error(message);
+    const error = new Error(message);
+    error.status = response.status;
+    error.body = body;
+    throw error;
   }
 
   return body;
