@@ -50,3 +50,8 @@ class LatestBookResponse(BaseModel):
     original_filename: Optional[str] = None
     download_url: Optional[str] = None
     created_at: Optional[datetime] = None
+
+class UploadResponse(BaseModel):
+    book_id: Optional[str] = None
+    status: str
+    message: str

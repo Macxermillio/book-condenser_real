@@ -19,6 +19,5 @@ For deployment, set `VITE_API_BASE_URL` to your hosted backend URL, or add an eq
 - `POST /auth/signup` accepts `{ "email", "password", "full_name" }`.
 - `POST /auth/login` accepts form fields `username` and `password`.
 - `GET /auth/me` requires `Authorization: Bearer <token>`.
-- `POST /auth/upload` requires `Authorization: Bearer <token>` and multipart field `file`.
-
-The UI allows one active upload at a time and shows the returned download link when processing completes.
+- `POST /auth/upload` requires `Authorization: Bearer <token>` and multipart field `file`. Returns `202` with `{ "book_id", "status": "processing", "message" }` while condensation runs in the background.
+- `GET /auth/latest-book` returns book status; poll until `status` is `done` and use `download_url`.

@@ -16,6 +16,7 @@ from app.models import (
     PasswordReset,
     RefreshSessionRequest,
     LatestBookResponse,
+    UploadResponse,
 )
 from app.config import get_settings
 from app.auth import get_current_user
@@ -271,6 +272,25 @@ async def process_book_task(file: str, user_id: str, book_id: str | None = None)
     return download_url
 
 
+async def _run_process_book_background(
+    file: str,
+    user_id: str,
+    book_id: str | None,
+    condensed_filename: str,
+):
+    try:
+        await process_book_task(file, user_id, book_id=book_id)
+        asyncio.create_task(schedule_deletion(file, user_id))
+        asyncio.create_task(schedule_deletion(condensed_filename, user_id))
+    except Exception:
+        logger.exception(
+            "Background processing failed — user=%s file=%s book=%s",
+            user_id,
+            file,
+            book_id,
+        )
+
+
 async def schedule_deletion(file: str, user_id: str, delay: int = 1800):
     await asyncio.sleep(delay)
     try:
@@ -294,7 +314,7 @@ async def delete_log(user_id: str, delay: int = 900):
             e,
         )
 
-@router.post("/upload")
+@router.post("/upload", status_code=202, response_model=UploadResponse)
 async def upload_file(
     file: UploadFile = File(...),
     user=Depends(get_current_user),
@@ -303,7 +323,6 @@ async def upload_file(
         raise RateLimitError(
             log_message=f"Rate limit exceeded for user={user.id}"
         )
-    await asyncio.sleep(10)
     try:
         book_id = supabase_func.log_usage(
             user_id=user.id, file_name=file.filename, email=user.email
@@ -334,16 +353,22 @@ async def upload_file(
     condensed_filename = (
         f"{os.path.splitext(file.filename)[0]}_condensed.pdf"
     )
-    download_url = await process_book_task(
-        file.filename, user.id, book_id=book_id
+    asyncio.create_task(
+        _run_process_book_background(
+            file.filename,
+            user.id,
+            book_id,
+            condensed_filename,
+        )
     )
 
-    asyncio.create_task(schedule_deletion(file.filename, user.id))
-    asyncio.create_task(schedule_deletion(condensed_filename, user.id))
-
     return {
-        "message": "Your book is ready to download!",
-        "download_url": download_url,
+        "book_id": book_id,
+        "status": "processing",
+        "message": (
+            "Your book is being condensed. "
+            "This can take up to 15 minutes."
+        ),
     }
 
 

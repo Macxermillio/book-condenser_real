@@ -3,6 +3,37 @@ const TOKEN_KEY = "book_condenser_token";
 const REFRESH_TOKEN_KEY = "book_condenser_refresh_token";
 const SESSION_REFRESHED_AT_KEY = "book_condenser_session_refreshed_at";
 
+/** Refresh when the access token expires within this window. */
+export const REFRESH_BUFFER_MS = 5 * 60 * 1000;
+
+function decodeJwtPayload(token) {
+  try {
+    const segment = token.split(".")[1];
+    if (!segment) return null;
+    const json = atob(segment.replace(/-/g, "+").replace(/_/g, "/"));
+    return JSON.parse(json);
+  } catch {
+    return null;
+  }
+}
+
+export function getAccessTokenExpiresAt(token) {
+  const payload = decodeJwtPayload(token);
+  return payload?.exp ? payload.exp * 1000 : null;
+}
+
+export function isAccessTokenExpired(token, bufferMs = 0) {
+  const expiresAt = getAccessTokenExpiresAt(token);
+  if (!expiresAt) return true;
+  return Date.now() >= expiresAt - bufferMs;
+}
+
+export function accessTokenExpiresWithin(token, withinMs) {
+  const expiresAt = getAccessTokenExpiresAt(token);
+  if (!expiresAt) return true;
+  return expiresAt - Date.now() <= withinMs;
+}
+
 async function parseResponse(response) {
   const contentType = response.headers.get("content-type") || "";
   let body;
@@ -102,6 +133,41 @@ export async function refreshSession(refreshToken) {
   }));
 }
 
+export async function ensureValidAccessToken({
+  minValidForMs = 0,
+  forceRefresh = false
+} = {}) {
+  const token = getStoredToken();
+  const refreshToken = getStoredRefreshToken();
+
+  if (!refreshToken) {
+    throw new Error("Your session expired. Please log in again.");
+  }
+
+  const refreshThresholdMs = Math.max(REFRESH_BUFFER_MS, minValidForMs);
+  const needsRefresh =
+    forceRefresh ||
+    !token ||
+    isAccessTokenExpired(token) ||
+    accessTokenExpiresWithin(token, refreshThresholdMs);
+
+  if (!needsRefresh) {
+    return token;
+  }
+
+  try {
+    const session = await refreshSession(refreshToken);
+    storeSession(session);
+    return session.access_token;
+  } catch {
+    if (token && !isAccessTokenExpired(token)) {
+      return token;
+    }
+    clearStoredToken();
+    throw new Error("Your session expired. Please log in again.");
+  }
+}
+
 export async function getProfile(token) {
   return parseResponse(await fetch(`${API_BASE_URL}/auth/me`, {
     headers: { Authorization: `Bearer ${token}` }
@@ -128,7 +194,7 @@ export async function resetPassword({ accessToken, refreshToken, newPassword }) 
   }));
 }
 
-export async function getLatestBook({ token, filename }) {
+export async function getLatestBook({ token, filename, signal }) {
   const params = new URLSearchParams();
   if (filename) {
     params.set("filename", filename);
@@ -137,7 +203,8 @@ export async function getLatestBook({ token, filename }) {
   const url = `${API_BASE_URL}/auth/latest-book${query ? `?${query}` : ""}`;
 
   return parseResponse(await fetch(url, {
-    headers: { Authorization: `Bearer ${token}` }
+    headers: { Authorization: `Bearer ${token}` },
+    signal
   }));
 }
 

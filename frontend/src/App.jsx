@@ -11,13 +11,11 @@ import {
 } from "lucide-react";
 import {
   clearStoredToken,
+  ensureValidAccessToken,
   getProfile,
-  getSessionRefreshedAt,
-  getStoredRefreshToken,
   getStoredToken,
   login,
   requestPasswordReset,
-  refreshSession,
   resetPassword,
   signup,
   storeSession,
@@ -30,7 +28,8 @@ const views = {
   about: "about"
 };
 
-const SESSION_REFRESH_AFTER_MS = 5 * 60 * 1000;
+const PROCESSING_TIMEOUT_MS = 15 * 60 * 1000;
+const POLL_INTERVAL_MS = 10_000;
 
 function formatDate(value) {
   if (!value) return "Unavailable";
@@ -723,8 +722,21 @@ export default function App() {
       }
 
       try {
-        const currentProfile = await getProfile(token);
+        let activeToken = token;
+        let currentProfile;
+
+        try {
+          currentProfile = await getProfile(activeToken);
+        } catch (error) {
+          if (error.status !== 401) {
+            throw error;
+          }
+          activeToken = await ensureValidAccessToken({ forceRefresh: true });
+          currentProfile = await getProfile(activeToken);
+        }
+
         if (isMounted) {
+          setToken(activeToken);
           setProfile(currentProfile);
           setBootState("ready");
         }
@@ -751,15 +763,12 @@ export default function App() {
       if (document.visibilityState !== "visible") return;
       if (refreshInFlightRef.current) return;
 
-      const refreshToken = getStoredRefreshToken();
-      const lastRefresh = getSessionRefreshedAt();
-      if (!refreshToken || Date.now() - lastRefresh < SESSION_REFRESH_AFTER_MS) return;
-
       refreshInFlightRef.current = true;
       try {
-        const session = await refreshSession(refreshToken);
-        storeSession(session);
-        setToken(session.access_token);
+        const freshToken = await ensureValidAccessToken();
+        if (freshToken !== token) {
+          setToken(freshToken);
+        }
       } catch {
         clearStoredToken();
         setToken(null);
@@ -795,47 +804,81 @@ export default function App() {
     setUploadState({ type: "idle", message: "", downloadUrl: "" });
   }
 
-  async function refreshCurrentSession() {
-    const refreshToken = getStoredRefreshToken();
-    if (!refreshToken) {
-      throw new Error("Your session expired. Please log in again.");
-    }
+  function waitWithSignal(ms, signal) {
+    return new Promise((resolve, reject) => {
+      if (signal?.aborted) {
+        reject(new DOMException("Aborted", "AbortError"));
+        return;
+      }
 
-    const session = await refreshSession(refreshToken);
-    storeSession(session);
-    setToken(session.access_token);
-    return session.access_token;
+      const timeoutId = setTimeout(resolve, ms);
+      signal?.addEventListener("abort", () => {
+        clearTimeout(timeoutId);
+        reject(new DOMException("Aborted", "AbortError"));
+      }, { once: true });
+    });
   }
 
-  async function tryRecoverLatestBook(token, filename) {
-    const POLL_INTERVAL_MS = 10_000;
-    const MAX_POLLS = 12;
+  async function fetchLatestBook(token, filename, signal) {
+    let activeToken = token;
 
-    for (let attempt = 0; attempt <= MAX_POLLS; attempt += 1) {
-      const latest = await getLatestBook({ token, filename });
+    try {
+      const latest = await getLatestBook({ token: activeToken, filename, signal });
+      return { latest, token: activeToken };
+    } catch (error) {
+      if (error.status !== 401) {
+        throw error;
+      }
+      activeToken = await ensureValidAccessToken({ forceRefresh: true });
+      setToken(activeToken);
+      const latest = await getLatestBook({ token: activeToken, filename, signal });
+      return { latest, token: activeToken };
+    }
+  }
+
+  async function pollBookUntilDone(token, filename, signal, deadline) {
+    let pollToken = token;
+
+    while (Date.now() < deadline) {
+      const { latest, token: nextToken } = await fetchLatestBook(
+        pollToken,
+        filename,
+        signal
+      );
+      pollToken = nextToken;
 
       if (latest.status === "done" && latest.download_url) {
         return latest;
       }
 
-      if (latest.status !== "processing" || attempt === MAX_POLLS) {
-        return latest;
+      if (latest.status === "error") {
+        throw new Error("Condensation failed. Please try again.");
       }
 
-      await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+      if (latest.status !== "processing") {
+        throw new Error("Unexpected processing status. Please try again.");
+      }
+
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) {
+        break;
+      }
+
+      await waitWithSignal(Math.min(POLL_INTERVAL_MS, remainingMs), signal);
     }
 
-    return null;
+    throw new DOMException("Processing timed out", "AbortError");
   }
 
   async function handleUpload() {
     if (!selectedFile || uploadState.type === "uploading") return;
 
-    const TIMEOUT_MS = 15 * 60 * 1000;
+    const deadline = Date.now() + PROCESSING_TIMEOUT_MS;
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
+    const timeoutId = setTimeout(() => controller.abort(), PROCESSING_TIMEOUT_MS);
+    const filename = selectedFile.name;
 
-    setUploadState({ type: "uploading", message: "Condensing your book…", downloadUrl: "" });
+    setUploadState({ type: "uploading", message: "Uploading your book…", downloadUrl: "" });
 
     const DISMISS_MS = 60 * 60 * 1000;
 
@@ -847,24 +890,46 @@ export default function App() {
     }
 
     try {
-      let uploadToken = await refreshCurrentSession();
-      let result;
+      let uploadToken = await ensureValidAccessToken({ minValidForMs: 60_000 });
+      setToken(uploadToken);
 
       try {
-        result = await uploadBook({ file: selectedFile, token: uploadToken, signal: controller.signal });
+        await uploadBook({
+          file: selectedFile,
+          token: uploadToken,
+          signal: controller.signal
+        });
       } catch (error) {
         if (error.status !== 401) {
           throw error;
         }
-        uploadToken = await refreshCurrentSession();
-        result = await uploadBook({ file: selectedFile, token: uploadToken, signal: controller.signal });
+        uploadToken = await ensureValidAccessToken({ forceRefresh: true });
+        setToken(uploadToken);
+        await uploadBook({
+          file: selectedFile,
+          token: uploadToken,
+          signal: controller.signal
+        });
       }
+
+      setUploadState({
+        type: "uploading",
+        message: "Condensing your book…",
+        downloadUrl: ""
+      });
+
+      const finished = await pollBookUntilDone(
+        uploadToken,
+        filename,
+        controller.signal,
+        deadline
+      );
 
       clearTimeout(timeoutId);
       setUploadState({
         type: "success",
-        message: result.message || "Your book is ready",
-        downloadUrl: result.download_url
+        message: "Your book is ready.",
+        downloadUrl: finished.download_url
       });
       setSelectedFile(null);
       scheduleDismiss();
@@ -872,21 +937,28 @@ export default function App() {
       clearTimeout(timeoutId);
 
       try {
-        const recoveryToken = await refreshCurrentSession();
-        const recovered = await tryRecoverLatestBook(
-          recoveryToken,
-          selectedFile.name
-        );
+        const recoveryToken = await ensureValidAccessToken({ forceRefresh: true });
+        setToken(recoveryToken);
 
-        if (recovered?.status === "done" && recovered.download_url) {
-          setUploadState({
-            type: "success",
-            message: "Your book finished processing while the connection was interrupted.",
-            downloadUrl: recovered.download_url
-          });
-          setSelectedFile(null);
-          scheduleDismiss();
-          return;
+        const remainingMs = deadline - Date.now();
+        if (remainingMs > 0) {
+          const recovered = await pollBookUntilDone(
+            recoveryToken,
+            filename,
+            AbortSignal.timeout(remainingMs),
+            deadline
+          );
+
+          if (recovered?.status === "done" && recovered.download_url) {
+            setUploadState({
+              type: "success",
+              message: "Your book is ready.",
+              downloadUrl: recovered.download_url
+            });
+            setSelectedFile(null);
+            scheduleDismiss();
+            return;
+          }
         }
       } catch {
         // Fall through to the original error message.
