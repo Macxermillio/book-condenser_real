@@ -276,12 +276,9 @@ async def _run_process_book_background(
     file: str,
     user_id: str,
     book_id: str | None,
-    condensed_filename: str,
 ):
     try:
         await process_book_task(file, user_id, book_id=book_id)
-        asyncio.create_task(schedule_deletion(file, user_id))
-        asyncio.create_task(schedule_deletion(condensed_filename, user_id))
     except Exception:
         logger.exception(
             "Background processing failed — user=%s file=%s book=%s",
@@ -290,29 +287,6 @@ async def _run_process_book_background(
             book_id,
         )
 
-
-async def schedule_deletion(file: str, user_id: str, delay: int = 1800):
-    await asyncio.sleep(delay)
-    try:
-        supabase_func.delete_file(file, user_id)
-    except Exception as e:
-        logger.warning(
-            "Scheduled deletion failed — file=%s user=%s: %s",
-            file,
-            user_id,
-            e,
-        )
-
-async def delete_log(user_id: str, delay: int = 900):
-    await asyncio.sleep(delay)
-    try:
-        supabase_func.log_deletion(user_id)
-    except Exception as e:
-        logger.warning(
-            "Scheduled deletion log failed — user=%s: %s",
-            user_id,
-            e,
-        )
 
 @router.post("/upload", status_code=202, response_model=UploadResponse)
 async def upload_file(
@@ -327,7 +301,6 @@ async def upload_file(
         book_id = supabase_func.log_usage(
             user_id=user.id, file_name=file.filename, email=user.email
         )
-        asyncio.create_task(delete_log(user.id))
     except Exception as e:
         logger.error(
             "Failed to log usage for user=%s: %s",
@@ -350,15 +323,11 @@ async def upload_file(
             )
         )
 
-    condensed_filename = (
-        f"{os.path.splitext(file.filename)[0]}_condensed.pdf"
-    )
     asyncio.create_task(
         _run_process_book_background(
             file.filename,
             user.id,
             book_id,
-            condensed_filename,
         )
     )
 
