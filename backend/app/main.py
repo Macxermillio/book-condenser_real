@@ -79,7 +79,7 @@ def protected_route(token: str = Depends(verify_token)):
 
 @app.get("/")
 def read_root():
-    return {"message": "Book Condenser API is live! 📚✨"}
+    return {"message": "Book Condenser API is live!"}
 
 if __name__ == "__main__":
 
