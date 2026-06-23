@@ -7,6 +7,8 @@ from app.routers import users
 from app.core.logging import logger
 from app.exceptions.base import AppException
 from app.exceptions.auth import AuthenticationError
+import uvicorn
+import os
 
 app = FastAPI(
     title="Book Condenser API",
@@ -21,6 +23,7 @@ app.add_middleware(
         "http://localhost:8000",
         "http://127.0.0.1:8000",
         "https://book-condenser-real.vercel.app",
+        "https://book-condenser-real-git-feature-co-8272ce-sandy-s-projects18boo.vercel.app/",
 
     ],
     allow_credentials=True,
@@ -77,4 +80,12 @@ def protected_route(token: str = Depends(verify_token)):
 
 @app.get("/")
 def read_root():
-    return {"message": "Book Condenser API is live! 📚✨"}
+    return {"message": "Book Condenser API is live!"}
+
+if __name__ == "__main__":
+
+
+    port = int(os.getenv("PORT", 8000))
+    reload = os.getenv("RELOAD", "False").lower() == "true"
+
+    uvicorn.run("app.main:app", host="0.0.0.0", port=port, reload=reload)
