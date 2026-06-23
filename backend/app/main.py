@@ -23,6 +23,7 @@ app.add_middleware(
         "http://localhost:8000",
         "http://127.0.0.1:8000",
         "https://book-condenser-real.vercel.app",
+        "https://book-condenser-real-git-feature-co-8272ce-sandy-s-projects18boo.vercel.app/",
 
     ],
     allow_credentials=True,
